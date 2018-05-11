@@ -1,0 +1,20 @@
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+*.user
+*.zip
+
+/lib/
+
+# Visual Studio files
+.vs/
+[Dd]ebug/
+[Rr]elease/
+*VC.db
+*VC.opendb

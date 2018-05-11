@@ -1,0 +1,6 @@
+[submodule "leveldb"]
+	path = leveldb
+	url = ../../third_party/leveldb.git
+[submodule "snappy"]
+	path = snappy
+	url = ../../third_party/snappy.git
