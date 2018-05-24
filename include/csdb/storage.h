@@ -197,6 +197,22 @@ public:
   Transaction transaction(const TransactionID &id) const;
 
   /**
+  * @brief Получить последнюю транзакцию по адресу источника
+  * @param[in] source Адрес источника
+  * @return Объект транзакции. Если транзакции не существует в данном пуле, возвращается
+  *         невалидный объект (\ref ::csdb::Transaction::is_valid() == false).
+  */
+  Transaction get_last_by_source(Address source) const noexcept;
+
+  /**
+  * @brief Получить последнюю транзакцию по адресу назначения
+  * @param[in] source Адрес назначения
+  * @return Объект транзакции. Если транзакции не существует в данном пуле, возвращается
+  *         невалидный объект (\ref ::csdb::Transaction::is_valid() == false).
+  */
+  Transaction get_last_by_target(Address target) const noexcept;
+
+  /**
    * @brief size возвращает количество пулов в хранилище
    * @return количество блоков в хранилище
    *

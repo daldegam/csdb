@@ -29,6 +29,7 @@ add_executable(${PROJECT_NAME}
   csdb_unit_tests_main.cpp
   csdb_unit_tests_environment.h
   csdb_unit_tests_environment.cpp
+  csdb_unit_tests_endian.cpp
   csdb_unit_tests_shared_data.h
   csdb_unit_tests_shared_data.cpp
   csdb_unit_tests_shared_data_p.cpp
@@ -71,6 +72,11 @@ target_compile_definitions(${PROJECT_NAME}
   PRIVATE -DGTEST_INVOKED
   PRIVATE -DCSDB_UNIT_TEST
   )
+if (CSDB_PLATFORM_IS_BIG_ENDIAN)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE -DCSDB_PLATFORM_IS_BIG_ENDIAN)
+else()
+  target_compile_definitions(${PROJECT_NAME} PRIVATE -DCSDB_PLATFORM_IS_LITTLE_ENDIAN)
+endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CSDB_INCLUDE_DIRS} ${CSDB_SOURCE_DIR})
 target_link_libraries(${PROJECT_NAME} leveldb)

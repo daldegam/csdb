@@ -500,3 +500,38 @@ TEST_F(AmountTest, AssignmentDivision)
     EXPECT_EQ(a, 0.55_c);
   }
 }
+
+TEST_F(AmountTest, ToString)
+{
+  EXPECT_EQ((0_c).to_string(), "0.00");
+  EXPECT_EQ((0_c).to_string(0), "0");
+  EXPECT_EQ((0_c).to_string(18), "0.000000000000000000");
+
+  EXPECT_EQ((1_c).to_string(), "1.00");
+  EXPECT_EQ((1_c).to_string(0), "1");
+  EXPECT_EQ((1_c).to_string(18), "1.000000000000000000");
+  EXPECT_EQ((1.1_c).to_string(), "1.10");
+  EXPECT_EQ((1.01_c).to_string(), "1.01");
+  EXPECT_EQ((1.001_c).to_string(), "1.001");
+  EXPECT_EQ((1.0001_c).to_string(), "1.0001");
+  EXPECT_EQ((1.00001_c).to_string(), "1.00001");
+
+  EXPECT_EQ((-1_c).to_string(), "-1.00");
+  EXPECT_EQ((-1_c).to_string(0), "-1");
+  EXPECT_EQ((-1_c).to_string(18), "-1.000000000000000000");
+  EXPECT_EQ((-1.1_c).to_string(), "-1.10");
+  EXPECT_EQ((-1.01_c).to_string(), "-1.01");
+  EXPECT_EQ((-1.001_c).to_string(), "-1.001");
+  EXPECT_EQ((-1.0001_c).to_string(), "-1.0001");
+  EXPECT_EQ((-1.00001_c).to_string(), "-1.00001");
+
+  EXPECT_EQ((1234567891_c).to_string(), "1234567891.00");
+  EXPECT_EQ((1234567891_c).to_string(0), "1234567891");
+  EXPECT_EQ((-1234567891_c).to_string(), "-1234567891.00");
+  EXPECT_EQ((-1234567891_c).to_string(0), "-1234567891");
+
+  EXPECT_EQ((1234567891.12345678912345678_c).to_string(), "1234567891.12345678912345678");
+  EXPECT_EQ((1234567891.12345678912345678_c).to_string(0), "1234567891.12345678912345678");
+  EXPECT_EQ((-1234567891.12345678912345678_c).to_string(), "-1234567891.12345678912345678");
+  EXPECT_EQ((-1234567891.12345678912345678_c).to_string(0), "-1234567891.12345678912345678");
+}

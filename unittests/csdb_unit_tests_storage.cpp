@@ -251,3 +251,45 @@ TEST_F(StorageTestEmpty, RetrieveTransaction)
     EXPECT_EQ(t, it.second);
   }
 }
+
+//
+// Get by source & target
+//
+
+TEST_F(StorageTestEmpty, GetTransactionBySourceAndTarget)
+{
+  Storage s;
+  ASSERT_TRUE(s.open(path_to_tests));
+  ASSERT_TRUE(s.last_hash().is_empty());
+
+  Pool p1{PoolHash{}, 0};
+  ASSERT_TRUE(p1.add_transaction(Transaction(addr1, addr2, Currency("RUB"), 112_c), true));
+  ASSERT_TRUE(p1.add_transaction(Transaction(addr1, addr3, Currency("RUB"), 113_c), true));
+  ASSERT_TRUE(p1.compose());
+
+  Pool p2{p1.hash(), 1};
+  ASSERT_TRUE(p2.add_transaction(Transaction(addr2, addr1, Currency("RUB"), 221_c), true));
+  ASSERT_TRUE(p2.add_transaction(Transaction(addr2, addr3, Currency("RUB"), 223_c), true));
+  ASSERT_TRUE(p2.compose());
+
+  Pool p3{p2.hash(), 2};
+  ASSERT_TRUE(p3.add_transaction(Transaction(addr3, addr1, Currency("RUB"), 331_c), true));
+  ASSERT_TRUE(p3.add_transaction(Transaction(addr3, addr1, Currency("RUB"), 333_c), true));
+  ASSERT_TRUE(p3.compose());
+
+  ASSERT_TRUE(s.pool_save(p1));
+  ASSERT_TRUE(s.pool_save(p2));
+  ASSERT_TRUE(s.pool_save(p3));
+
+  EXPECT_EQ(s.get_last_by_source(addr3).amount(), 333_c);
+  EXPECT_EQ(s.get_last_by_source(addr2).amount(), 223_c);
+  EXPECT_EQ(s.get_last_by_source(addr1).amount(), 113_c);
+
+  EXPECT_EQ(s.get_last_by_target(addr3).amount(), 223_c);
+  EXPECT_EQ(s.get_last_by_target(addr2).amount(), 112_c);
+  EXPECT_EQ(s.get_last_by_target(addr1).amount(), 333_c);
+
+  ::csdb::Address addr4 = ::csdb::Address::from_string("0000000000000000000000000000000000000004");
+  EXPECT_FALSE(s.get_last_by_source(addr4).is_valid());
+  EXPECT_FALSE(s.get_last_by_target(addr4).is_valid());
+}

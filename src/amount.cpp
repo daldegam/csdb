@@ -1,4 +1,12 @@
 #include "csdb/amount.h"
+
+#include <cstdio>
+#include <algorithm>
+
+#ifndef _MSC_VER
+#define sprintf_s sprintf
+#endif
+
 #include "binary_streams.h"
 
 namespace csdb {
@@ -26,6 +34,29 @@ Amount::Amount(double value)
     fraction_ -= AMOUNT_MAX_FRACTION;
     ++integral_;
   }
+}
+
+::std::string Amount::to_string(size_t min_decimal_places) const noexcept
+{
+  char buf[64];
+  char *end;
+  if ((0 > integral_) && (0 != fraction_)) {
+    end = sprintf_s(buf, "-%d.%018" PRIu64, (-1) - integral_, AMOUNT_MAX_FRACTION - fraction_) + buf - 1;
+  } else {
+    end = sprintf_s(buf, "%d.%018" PRIu64, integral_, fraction_) + buf - 1;
+  }
+
+  for(min_decimal_places = 18 - ::std::min<size_t>(min_decimal_places, 18);
+      min_decimal_places && ('0' == (*end));
+      --min_decimal_places, -- end)
+  {}
+
+  if ('.' == *end) {
+    --end;
+  }
+  end[1] = '\0';
+
+  return buf;
 }
 
 void Amount::put(priv::obstream& os) const

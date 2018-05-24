@@ -27,11 +27,16 @@ inline bool operator !=(const Transaction& a, const Transaction& b)
   return !(a == b);
 }
 
-bool operator ==(const Pool& a, const Pool& b);
+bool is_equal(const Pool& a, const Pool& b, bool compare_hash);
+
+inline bool operator ==(const Pool& a, const Pool& b)
+{
+  return is_equal(a, b, true);
+}
 
 inline bool operator !=(const Pool& a, const Pool& b)
 {
-  return !(a == b);
+  return !is_equal(a, b, true);
 }
 
 } // namespace csdb

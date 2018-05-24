@@ -1,8 +1,10 @@
 #include "csdb/pool.h"
 
+#include <cstring>
 #include <sstream>
 #include <iomanip>
 #include <map>
+#include <algorithm>
 
 #include "csdb/csdb.h"
 
@@ -11,6 +13,23 @@
 #include "binary_streams.h"
 #include "priv_crypto.h"
 #include "transaction_p.h"
+
+namespace {
+#pragma pack(push,1)
+struct pool_common_header_t
+{
+  uint16_t version_;
+  uint32_t signature_offset_;
+};
+#pragma pack(pop)
+enum SerializationVersion : uint16_t {
+  /**
+   * Данная версия будет использоваться вплоть до момента первого запуска
+   * с необходимостью созранения данных.
+   */
+  SERIALIZATION_V1 = 0x0001,
+};
+}
 
 namespace csdb {
 
@@ -95,8 +114,9 @@ bool PoolHash::get(::csdb::priv::ibstream &is)
 
 class Pool::priv : public ::csdb::internal::shared_data
 {
-  priv() : is_valid_(false), read_only_(false), sequence_(0) {}
+  priv() : common_header_{0,0}, is_valid_(false), read_only_(false), sequence_(0) {}
   priv(PoolHash previous_hash, Pool::sequence_t sequence, ::csdb::Storage::WeakPtr storage) :
+    common_header_{0,0},
     is_valid_(true),
     read_only_(false),
     previous_hash_(previous_hash),
@@ -106,6 +126,7 @@ class Pool::priv : public ::csdb::internal::shared_data
 
   void put(::csdb::priv::obstream& os) const
   {
+    os.put(&common_header_, sizeof(common_header_));
     os.put(previous_hash_);
     os.put(sequence_);
 
@@ -119,6 +140,15 @@ class Pool::priv : public ::csdb::internal::shared_data
 
   bool get(::csdb::priv::ibstream& is)
   {
+    if (!is.get(&common_header_, sizeof(common_header_))) {
+      return false;
+    }
+
+    if ((SERIALIZATION_V1 != common_header_.version_)
+        || ((is.size() + sizeof(common_header_)) < common_header_.signature_offset_)) {
+      return false;
+    }
+
     if(!is.get(previous_hash_)) {
       return false;
     }
@@ -146,10 +176,11 @@ class Pool::priv : public ::csdb::internal::shared_data
     }
 
     is_valid_ = true;
+    read_only_ = true;
     return true;
   }
 
-  void compose()
+  void compose(Pool::sign_fn_t sign_fn)
   {
     if (!is_valid_) {
       binary_representation_.clear();
@@ -165,16 +196,43 @@ class Pool::priv : public ::csdb::internal::shared_data
     put(os);
     binary_representation_ = os.buffer();
 
+    common_header_.version_ = SERIALIZATION_V1;
+    common_header_.signature_offset_ = static_cast<uint32_t>(binary_representation_.size());
+    memcpy(&(binary_representation_[0]), &common_header_, sizeof(common_header_));
+    if (nullptr != sign_fn) {
+      ::csdb::internal::byte_array sign = sign_fn(binary_representation_.data(), binary_representation_.size());
+      if (!sign.empty()) {
+        binary_representation_.insert(binary_representation_.end(), sign.begin(), sign.end());
+      }
+    }
+
+    read_only_ = true;
+
     update_transactions();
   }
 
   void update_transactions()
   {
-    read_only_ = true;
     hash_ = PoolHash::calc_from_data(binary_representation_);
     for (size_t idx = 0; idx < transactions_.size(); ++idx) {
       transactions_[idx].d->_update_id(hash_, idx);
     }
+  }
+
+  bool verify_sign(Pool::verify_fn_t verify_fn) const
+  {
+    if (nullptr == verify_fn) {
+      return false;
+    }
+
+    if ((!read_only_) || (binary_representation_.size() <= common_header_.signature_offset_)) {
+      return verify_fn(binary_representation_.data(), binary_representation_.size(), nullptr, 0);
+    }
+
+    const ::csdb::internal::byte_array::value_type* data = binary_representation_.data();
+    size_t size = binary_representation_.size();
+    return verify_fn(data, common_header_.signature_offset_,
+                     data + common_header_.signature_offset_, size - common_header_.signature_offset_);
   }
 
   Storage get_storage(Storage candidate)
@@ -191,6 +249,7 @@ class Pool::priv : public ::csdb::internal::shared_data
     return ::csdb::defaultStorage();
   }
 
+  pool_common_header_t common_header_;
   bool is_valid_;
   bool read_only_;
   PoolHash hash_;
@@ -224,6 +283,23 @@ PoolHash Pool::hash() const noexcept
   return d->hash_;
 }
 
+::csdb::internal::byte_array Pool::sign() const noexcept
+{
+  const priv* data = d.constData();
+
+  if (!data->read_only_ || (data->binary_representation_.size() <= data->common_header_.signature_offset_)) {
+    return ::csdb::internal::byte_array{};
+  }
+
+  return ::csdb::internal::byte_array(data->binary_representation_.begin() + data->common_header_.signature_offset_,
+                                      data->binary_representation_.end());
+}
+
+bool Pool::verify(verify_fn_t verify_fn) const noexcept
+{
+  return d->verify_sign(verify_fn);
+}
+
 PoolHash Pool::previous_hash() const noexcept
 {
   return d->previous_hash_;
@@ -249,12 +325,62 @@ Transaction Pool::transaction(TransactionID id) const
   return d->transactions_[id.d->index_];
 }
 
+Transaction Pool::get_last_by_source(Address source) const noexcept
+{
+  const auto data = d.constData();
+
+  if ((!data->is_valid_))
+  {
+    return Transaction{};
+  }
+
+  auto it_rend = data->transactions_.rend();
+  for (auto it = data->transactions_.rbegin(); it != it_rend; ++it)
+  {
+    const auto& t = *it;
+
+    if (t.source() == source)
+    {
+      return t;
+    }
+  }
+
+  return Transaction{};
+}
+
+Transaction Pool::get_last_by_target(Address target) const noexcept
+{
+  const auto data = d.constData();
+
+  if ((!data->is_valid_))
+  {
+    return Transaction{};
+  }
+
+  auto it_rend = data->transactions_.rend();
+  for (auto it = data->transactions_.rbegin(); it != it_rend; ++it)
+  {
+    const auto t = *it;
+
+    if (t.target() == target)
+    {
+      return t;
+    }
+  }
+
+  return Transaction{};
+}
+
 bool Pool::add_transaction(Transaction transaction
 #ifdef CSDB_UNIT_TEST
                      , bool skip_check
 #endif
                      )
 {
+  if(d.constData()->read_only_) {
+    return false;
+  }
+
   if (!transaction.is_valid()) {
     return false;
   }
@@ -267,7 +393,7 @@ bool Pool::add_transaction(Transaction transaction
   }
 #endif
 
-  d->transactions_.push_back(transaction);
+  d->transactions_.push_back(Transaction(new Transaction::priv(*(transaction.d.constData()))));
   return true;
 }
 
@@ -341,7 +467,7 @@ UserField Pool::user_field(user_field_id_t id) const noexcept
   return res;
 }
 
-bool Pool::compose()
+bool Pool::compose(sign_fn_t sign_fn)
 {
   if (d.constData()->read_only_) {
     return true;
@@ -351,7 +477,7 @@ bool Pool::compose()
     return false;
   }
 
-  d->compose();
+  d->compose(sign_fn);
   return true;
 }
 
@@ -360,17 +486,19 @@ bool Pool::compose()
   return d->binary_representation_;
 }
 
-Pool Pool::from_binary(const ::csdb::internal::byte_array& data)
+Pool Pool::from_binary(const ::csdb::internal::byte_array& data, verify_fn_t verify_fn)
 {
-  priv *p = new priv();
+  ::std::unique_ptr<priv> p(new priv());
   ::csdb::priv::ibstream is(data.data(), data.size());
   if (!p->get(is)) {
-    delete p;
     return Pool();
   }
   p->binary_representation_ = data;
+  if ((nullptr != verify_fn) && (!p->verify_sign(verify_fn))) {
+    return Pool();
+  }
   p->update_transactions();
-  return Pool(p);
+  return Pool(p.release());
 }
 
 bool Pool::save(Storage storage)
@@ -392,7 +520,7 @@ bool Pool::save(Storage storage)
   return false;
 }
 
-Pool Pool::load(PoolHash hash, Storage storage)
+Pool Pool::load(PoolHash hash, verify_fn_t verify_fn, Storage storage)
 {
   if (!storage.isOpen()) {
     storage = ::csdb::defaultStorage();

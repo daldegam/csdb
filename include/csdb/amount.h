@@ -11,6 +11,7 @@
 #include <type_traits>
 #include <limits>
 #include <iostream>
+#include <string>
 #include <stdexcept>
 
 #include "internal/math128ce.h"
@@ -168,6 +169,8 @@ public:
   // inline Amount& operator /=(double other);
 
   /// \todo Реализовать функцию muldiv для вычисление долей (процентов) для больших значений
+
+  ::std::string to_string(size_t min_decimal_places = 2) const noexcept;
 
   // Сериализация
 public:
@@ -422,19 +425,19 @@ struct Amount::amount_fraction<m, d>
 template<char d, char ...s>
 struct Amount::amount_full
 {
-  static constexpr const int32_t integral = amount_full<s...>::integral + amount_full<s...>::multiplier * (d - '0');
-  static constexpr const int32_t multiplier = amount_full<s...>::multiplier * 10;
+  static constexpr const uint64_t integral = amount_full<s...>::integral + amount_full<s...>::multiplier * (d - '0');
+  static constexpr const uint64_t multiplier = amount_full<s...>::multiplier * 10;
   static constexpr const uint64_t fraction = amount_full<s...>::fraction;
-  static constexpr const Amount value() {return Amount{integral, fraction, nullptr};}
+  static constexpr const Amount value() {return Amount{static_cast<int32_t>(integral), fraction, nullptr};}
 };
 
 template<char ...s>
 struct Amount::amount_full<'.', s...>
 {
-  static constexpr const int32_t integral = 0;
-  static constexpr const int32_t multiplier = 1;
+  static constexpr const uint64_t integral = 0;
+  static constexpr const uint64_t multiplier = 1;
   static constexpr const uint64_t fraction = amount_fraction<AMOUNT_MAX_FRACTION / 10ULL, s...>::value;
-  static constexpr const Amount value() {return Amount{integral, fraction, nullptr};}
+  static constexpr const Amount value() {return Amount{static_cast<int32_t>(integral), fraction, nullptr};}
 };
 
 } // namespace csdb
@@ -483,8 +486,7 @@ inline constexpr csdb::Amount operator "" _c ()
 /// \todo Реализовать вывод в строку с поддержкой ширины поля и точности.
 inline ::std::ostream& operator << (::std::ostream& os, const csdb::Amount& value)
 {
-  os << value.to_double();
-  return os;
+  return (os << value.to_string());
 }
 /// \todo Реализовать чтение из строки
 

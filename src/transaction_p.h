@@ -52,6 +52,16 @@ class Transaction::priv : public ::csdb::internal::shared_data
     balance_(0_c)
   {}
 
+  inline priv(const priv& other) :
+    read_only_(false),
+    source_(other.source_),
+    target_(other.target_),
+    currency_(other.currency_),
+    amount_(other.amount_),
+    balance_(other.balance_),
+    user_fields_(other.user_fields_)
+  {}
+
   inline priv(Address source, Address target, Currency currency, Amount amount, Amount balance) :
     read_only_(false),
     source_(source),
@@ -78,6 +88,7 @@ class Transaction::priv : public ::csdb::internal::shared_data
 
   friend class Transaction;
   friend class Pool;
+  friend class ::csdb::internal::shared_data_ptr<priv>;
 };
 
 } // namespace csdb

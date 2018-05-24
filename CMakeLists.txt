@@ -20,6 +20,8 @@ option(SNAPPY_BUILD_TESTS "" OFF)
 add_subdirectory(snappy)
 add_subdirectory(leveldb)
 
+TEST_BIG_ENDIAN(CSDB_PLATFORM_IS_BIG_ENDIAN)
+
 if(TARGET cscrypto)
   add_library(${PROJECT_NAME} STATIC
     src/csdb.cpp
@@ -47,6 +49,7 @@ if(TARGET cscrypto)
     include/csdb/internal/sorted_array_set.h
     include/csdb/internal/types.h
     include/csdb/internal/utils.h
+    include/csdb/internal/endian.h
     include/csdb/csdb.h
     include/csdb/amount.h
     include/csdb/transaction.h
@@ -62,6 +65,11 @@ if(TARGET cscrypto)
 
   target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(${PROJECT_NAME} leveldb cscrypto)
+  if (CSDB_PLATFORM_IS_BIG_ENDIAN)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DCSDB_PLATFORM_IS_BIG_ENDIAN)
+  else()
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DCSDB_PLATFORM_IS_LITTLE_ENDIAN)
+  endif()
 endif()
 
 if(CSDB_BUILD_UNITTESTS)

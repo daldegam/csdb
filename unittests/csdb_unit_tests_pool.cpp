@@ -4,6 +4,7 @@
 #include <set>
 #include <map>
 #include <stdexcept>
+#include <functional>
 
 #include <gtest/gtest.h>
 
@@ -27,6 +28,23 @@ protected:
   void TearDown() override
   {
     ASSERT_TRUE(::csdb::internal::path_remove(path_to_tests_));
+  }
+
+  static ::csdb::internal::byte_array sign(const void *data, size_t size)
+  {
+    size_t hash = ::std::hash<::std::string>{}(::std::string(static_cast<const char*>(data), size));
+    ::csdb::internal::byte_array res(sizeof(hash));
+    memcpy(&res[0], &hash, sizeof(hash));
+    return res;
+  }
+
+  static bool verify(const void *data, size_t data_size, const void *signature, size_t signature_size)
+  {
+    if (sizeof(size_t) != signature_size) {
+      return false;
+    }
+    size_t hash = ::std::hash<::std::string>{}(::std::string(static_cast<const char*>(data), data_size));
+    return (0 == memcmp(&hash, signature, sizeof(size_t)));
   }
 
   ::std::string path_to_tests_;
@@ -309,8 +327,11 @@ TEST_F(PoolTest, MakeValid)
 TEST_F(PoolTest, SetReadOnlyAfterCompose)
 {
   Pool p(PoolHash::calc_from_data({1}), 1);
+  Transaction t{addr1, addr2, Currency("CS"), 1_c};
   EXPECT_TRUE(p.is_valid());
   EXPECT_FALSE(p.is_read_only());
+  EXPECT_TRUE(p.add_transaction(t, true));
+  EXPECT_EQ(p.transactions_count(), static_cast<size_t>(1));
 
   EXPECT_TRUE(p.compose());
   EXPECT_TRUE(p.is_valid());
@@ -321,6 +342,9 @@ TEST_F(PoolTest, SetReadOnlyAfterCompose)
 
   p.set_previous_hash(PoolHash::calc_from_data({2}));
   EXPECT_EQ(p.previous_hash(), PoolHash::calc_from_data({1}));
+
+  EXPECT_FALSE(p.add_transaction(t, true));
+  EXPECT_EQ(p.transactions_count(), static_cast<size_t>(1));
 }
 
 TEST_F(PoolTest, ToFromBinaryValidEmpty)
@@ -603,4 +627,151 @@ TEST_F(PoolTest, UserFieldBlockAddForToOnly)
   EXPECT_FALSE(t_res.add_user_field(1, 1));
   EXPECT_EQ(p_src, p_res);
   EXPECT_EQ(t_src, t_res);
+}
+
+//
+// Get transaction by source, target
+//
+
+TEST_F(PoolTest, GetTransactionBySource)
+{
+  Pool pool{PoolHash{}, 0};
+  ASSERT_TRUE(pool.is_valid());
+  ASSERT_FALSE(pool.is_read_only());
+
+  // Should work with non read-only pool
+
+  Transaction t0{addr1, addr2, Currency("CS"), 12_c};
+  ASSERT_TRUE(pool.add_transaction(t0, true));
+
+  Transaction t1{addr1, addr3, Currency("CS"), 13_c};
+  ASSERT_TRUE(pool.add_transaction(t1, true));
+
+  EXPECT_TRUE(pool.get_last_by_source(addr1).is_valid());
+  EXPECT_FALSE(pool.get_last_by_source(addr2).is_valid());
+
+  // And on read-only as well
+
+  ASSERT_TRUE(pool.compose());
+  ASSERT_TRUE(pool.is_valid());
+  ASSERT_TRUE(pool.is_read_only());
+
+  EXPECT_TRUE(pool.get_last_by_source(addr1).is_valid());
+  EXPECT_FALSE(pool.get_last_by_source(addr2).is_valid());
+
+  // Case if source appears multiple times, should return last transaction 
+
+  EXPECT_EQ(pool.get_last_by_source(addr1).amount(), 13_c);
+}
+
+TEST_F(PoolTest, GetTransactionByTarget)
+{
+  Pool pool{PoolHash{}, 0};
+  ASSERT_TRUE(pool.is_valid());
+  ASSERT_FALSE(pool.is_read_only());
+
+  // Should work with non read-only pool
+
+  Transaction t0{addr1, addr2, Currency("CS"), 12_c};
+  ASSERT_TRUE(pool.add_transaction(t0, true));
+
+  Transaction t1{addr3, addr2, Currency("CS"), 32_c};
+  ASSERT_TRUE(pool.add_transaction(t1, true));
+
+  EXPECT_TRUE(pool.get_last_by_target(addr2).is_valid());
+  EXPECT_FALSE(pool.get_last_by_target(addr1).is_valid());
+
+  // And on read-only as well
+
+  ASSERT_TRUE(pool.compose());
+  ASSERT_TRUE(pool.is_valid());
+  ASSERT_TRUE(pool.is_read_only());
+
+  EXPECT_TRUE(pool.get_last_by_target(addr2).is_valid());
+  EXPECT_FALSE(pool.get_last_by_target(addr1).is_valid());
+
+  // Case if target appears multiple times, should return last transaction
+
+  EXPECT_EQ(pool.get_last_by_target(addr2).amount(), 32_c);
+}
+
+TEST_F(PoolTest, EmptySign)
+{
+  Pool pool{PoolHash{}, 0};
+  ASSERT_TRUE(pool.add_transaction(Transaction{addr1, addr2, Currency("CS"), 11_c}, true));
+  EXPECT_TRUE(pool.sign().empty());
+  EXPECT_TRUE(pool.compose());
+  EXPECT_TRUE(pool.sign().empty());
+}
+
+TEST_F(PoolTest, DummySign)
+{
+  Pool p1{PoolHash{}, 0};
+  ASSERT_TRUE(p1.add_transaction(Transaction{addr1, addr2, Currency("CS"), 11_c}, true));
+
+  EXPECT_TRUE(p1.compose([](const void*, size_t){return ::csdb::internal::byte_array{1,2,3};}));
+  EXPECT_TRUE(p1.is_valid());
+  EXPECT_TRUE(p1.is_read_only());
+  EXPECT_EQ(p1.sign(), (::csdb::internal::byte_array{1,2,3}));
+
+  Pool p2 = Pool::from_binary(p1.to_binary());
+  EXPECT_TRUE(p2.is_valid());
+  EXPECT_TRUE(p2.is_read_only());
+  EXPECT_EQ(p2.sign(), (::csdb::internal::byte_array{1,2,3}));
+}
+
+TEST_F(PoolTest, VerifySignValid)
+{
+  Pool p1{PoolHash{}, 0};
+  ASSERT_TRUE(p1.add_transaction(Transaction{addr1, addr2, Currency("CS"), 11_c}, true));
+
+  EXPECT_TRUE(p1.compose(sign));
+  EXPECT_TRUE(p1.is_valid());
+  EXPECT_TRUE(p1.is_read_only());
+  EXPECT_TRUE(p1.verify(verify));
+
+  Pool p2 = Pool::from_binary(p1.to_binary(), verify);
+  EXPECT_TRUE(p2.is_valid());
+  EXPECT_TRUE(p2.is_read_only());
+  EXPECT_TRUE(p2.verify(verify));
+}
+
+TEST_F(PoolTest, VerifySignInvalid)
+{
+  Pool src{PoolHash{}, 0};
+  ASSERT_TRUE(src.add_transaction(Transaction{addr1, addr2, Currency("CS"), 11_c}, true));
+
+  ASSERT_TRUE(src.compose(sign));
+  ASSERT_TRUE(src.is_valid());
+  ASSERT_TRUE(src.is_read_only());
+  ASSERT_TRUE(src.verify(verify));
+
+  ::csdb::internal::byte_array valid = src.to_binary();
+  ASSERT_FALSE(valid.empty());
+
+  {
+    ::csdb::internal::byte_array invalid(valid);
+    invalid.resize(invalid.size() - 1);
+
+    Pool p_valid = Pool::from_binary(invalid);
+    EXPECT_TRUE(p_valid.is_valid());
+    EXPECT_TRUE(is_equal(p_valid, src, false));
+    EXPECT_NE(p_valid, src);  // Hashes must be different
+
+    Pool p_invalid = Pool::from_binary(invalid, verify);
+    EXPECT_FALSE(p_invalid.is_valid());
+  }
+
+  {
+    ::csdb::internal::byte_array invalid(valid);
+    invalid[invalid.size() - 1] = ~invalid[invalid.size() - 1];
+
+    Pool p_valid = Pool::from_binary(invalid);
+    EXPECT_TRUE(p_valid.is_valid());
+    EXPECT_TRUE(is_equal(p_valid, src, false));
+    EXPECT_NE(p_valid, src);  // Hashes must be different
+
+    Pool p_invalid = Pool::from_binary(invalid, verify);
+    EXPECT_FALSE(p_invalid.is_valid());
+  }
 }

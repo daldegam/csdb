@@ -244,3 +244,57 @@ TEST_F(TransactionTest, Balance)
     EXPECT_EQ(t1.balance(), 4.56_c);
   }
 }
+
+TEST_F(TransactionTest, PreventReadOnlyModification)
+{
+  Pool p{PoolHash{}, 0};
+  ASSERT_TRUE(p.is_valid());
+  ASSERT_TRUE(p.add_transaction(Transaction{addr1, addr2, Currency("CS"), 1_c}, true));
+
+  Transaction t = p.transaction(0);
+  ASSERT_TRUE(t.is_valid());
+  ASSERT_FALSE(t.id().is_valid());
+
+  ASSERT_TRUE(p.compose());
+  t = p.transaction(0);
+  EXPECT_TRUE(t.is_valid());
+  EXPECT_TRUE(t.is_read_only());
+  EXPECT_TRUE(t.id().is_valid());
+
+  Amount save = t.amount();
+  t.set_amount(save + 1_c);
+  EXPECT_EQ(t.amount(), save);
+
+  save = t.balance();
+  t.set_balance(save + 1_c);
+  EXPECT_EQ(t.balance(), save);
+}
+
+TEST_F(TransactionTest, DropIDThenAddingToPool)
+{
+  Pool p_src{PoolHash{}, 0};
+  ASSERT_TRUE(p_src.is_valid());
+  ASSERT_TRUE(p_src.add_transaction(Transaction{addr1, addr2, Currency("CS"), 1_c}, true));
+  ASSERT_TRUE(p_src.compose());
+
+  Transaction t_src = p_src.transaction(0);
+  EXPECT_TRUE(t_src.is_valid());
+  EXPECT_TRUE(t_src.is_read_only());
+  EXPECT_TRUE(t_src.id().is_valid());
+
+  Pool p_dst{PoolHash{}, 1};
+  ASSERT_TRUE(p_dst.is_valid());
+  ASSERT_TRUE(p_dst.add_transaction(t_src, true));
+
+  Transaction t_dst = p_dst.transaction(0);
+  EXPECT_TRUE(t_dst.is_valid());
+  EXPECT_EQ(t_src, t_dst);
+  EXPECT_FALSE(t_dst.id().is_valid());
+
+  ASSERT_TRUE(p_dst.compose());
+  t_dst = p_dst.transaction(0);
+  EXPECT_TRUE(t_dst.is_valid());
+  EXPECT_EQ(t_src, t_dst);
+  EXPECT_TRUE(t_dst.id().is_valid());
+  EXPECT_NE(t_src.id(), t_dst.id());
+}

@@ -482,4 +482,36 @@ Transaction Storage::transaction(const TransactionID &id) const
   return pool_load(id.pool_hash()).transaction(id);
 }
 
+Transaction Storage::get_last_by_source(Address source) const noexcept
+{
+  Pool curr = pool_load(last_hash());
+
+  while (curr.is_valid())
+  {
+    const auto& t = curr.get_last_by_source(source);
+    if (t.is_valid())
+      return t;
+
+    curr = pool_load(curr.previous_hash());
+  }
+
+  return Transaction{};
+}
+
+Transaction Storage::get_last_by_target(Address target) const noexcept
+{
+  Pool curr = pool_load(last_hash());
+
+  while (curr.is_valid())
+  {
+    const auto& t = curr.get_last_by_target(target);
+    if (t.is_valid())
+      return t;
+
+    curr = pool_load(curr.previous_hash());
+  }
+
+  return Transaction{};
+}
+
 }

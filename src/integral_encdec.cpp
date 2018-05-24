@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "csdb/internal/endian.h"
+
 namespace csdb {
 namespace priv {
 
@@ -15,6 +17,7 @@ std::size_t encode(void *buf, bool value)
 template<>
 std::size_t encode(void *buf, uint64_t value)
 {
+  value = ::csdb::internal::to_little_endian(value);
   uint8_t bits = (sizeof(uint64_t) * 8);
   uint64_t mask = (static_cast<uint64_t>(1) << (bits - 1));
   bool new_bit = (0 != (mask & value)), bit;
@@ -74,7 +77,7 @@ std::size_t decode(const void *buf, std::size_t size, uint64_t& value)
       val |= static_cast<uint64_t>(-1) << ((bytes + 1) * 7);
     }
   }
-  value = val;
+  value = ::csdb::internal::from_little_endian(val);
   return bytes + 1;
 }
 

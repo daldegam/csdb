@@ -26,7 +26,7 @@ bool operator ==(const Transaction& a, const Transaction& b)
   return true;
 }
 
-bool operator ==(const Pool& a, const Pool& b)
+bool is_equal(const Pool& a, const Pool& b, bool compare_hash)
 {
   if (a.is_valid() != b.is_valid()) {
     return false;
@@ -44,7 +44,7 @@ bool operator ==(const Pool& a, const Pool& b)
     return false;
   }
 
-  if (a.is_read_only()) {
+  if (compare_hash && a.is_read_only()) {
     if (a.hash() != b.hash()) {
       return false;
     }

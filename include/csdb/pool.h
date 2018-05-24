@@ -11,6 +11,7 @@
 #include <vector>
 #include <array>
 #include <string>
+#include <functional>
 
 #include "csdb/transaction.h"
 #include "csdb/storage.h"
@@ -75,12 +76,70 @@ class Pool
   SHARED_DATA_CLASS_DECLARE(Pool)
 public:
   typedef uint64_t sequence_t;
+  typedef ::std::function<::csdb::internal::byte_array (const void *, size_t)> sign_fn_t;
+  typedef ::std::function<bool (const void *data, size_t data_size,
+                                const void *signature, size_t signature_size)> verify_fn_t;
 
 public:
   Pool(PoolHash previous_hash, sequence_t sequence, Storage storage = Storage());
 
-  static Pool from_binary(const ::csdb::internal::byte_array& data);
-  static Pool load(PoolHash hash, Storage storage = Storage());
+  /**
+   * @brief Получение пула из бинарного представления
+   * @param[in] data      Бинарное представлени пула.
+   * @param[in] verify_fn Функция проверки ЭЦП.
+   * @return Объект пула, если пул успешно сформирован из бинарного представления, или невалидный
+   *         объект (\ref is_valid() == false), если не удалось сформировать пул из бинарного представления.
+   *
+   * Если verify_fn != nullptr, то она вызывается перед формированием пула, и если она вернёт false,
+   * формирование прерывеется и возвращается невалидный объект.
+   *
+   * \sa Pool::verify()
+   */
+  static Pool from_binary(const ::csdb::internal::byte_array& data, verify_fn_t verify_fn = nullptr);
+
+  /**
+   * @brief Загружает пул из хранилища
+   * @param[in] hash      Хэш пула, который надо загрузить
+   * @param[in] verify_fn Функция проверки ЭЦП
+   * @param[in] storage   Хранилище, из которого загрузить пул.
+   * @return Объект пула, если пул успешно загружен, или невалидный объект (\ref is_valid() == false), если
+   *         во время загрузки произошли ошибки.
+   *
+   * Если storage не указано, или переданное хранилище не открыто, то функция пытается использовать
+   * хранилище по умолчанию (\ref csdb::defaultStorage())
+   *
+   * \sa Storage::last_error(), Storage::last_error_message()
+   */
+  static Pool load(PoolHash hash, verify_fn_t verify_fn, Storage storage = Storage());
+
+  /**
+   * @brief Загружает пул из хранилища
+   * @param[in] hash      Хэш пула, который надо загрузить
+   * @param[in] storage   Хранилище, из которого загрузить пул.
+   * @return Объект пула, если пул успешно загружен, или невалидный объект (\ref is_valid() == false), если
+   *         во время загрузки произошли ошибки.
+   *
+   * \overload
+   *
+   * Функция оставлена для совместимости с предыдущими версиями и загружает пул без проверки ЭЦП
+   */
+  static inline Pool load(PoolHash hash, Storage storage = Storage());
+
+  /**
+   * @brief Проверка ЭЦП пула
+   * @param[in] verify_fn Функция проверки ЭЦП.
+   * @return Результат выполнения verify_fn для бинарного представления пула и ЭЦП, или false,
+   *         если verify_fn == nullptr.
+   *
+   * Функция доступна только для read-only валидных пулов. В противном случае verify_fn не вызывается,
+   * и функция возвращает 0.
+   *
+   * \warning При отсутствии ЭЦП в пуле функции verify_fn передаются signature = nullptr и signature_size = 0.
+   * Предполагается, что вызывающий модуль сам определяет, допустимо ли отсутствие подписи. Т.е. если
+   * отсутствие подписи допускается, то verify_fn должа возвращать true в случе signature == nullptr или
+   * signature_size == 0.
+   */
+  bool verify(verify_fn_t verify_fn) const noexcept;
 
   bool is_valid() const noexcept;
   bool is_read_only() const noexcept;
@@ -99,7 +158,7 @@ public:
    * @return true, если транзакция была успешно добавлена. false, если транзакция не прошла
    * проверку.
    *
-   * Добаление возможно, только во вновь создаваемый пул (т.е. если \ref is_read_only возвращает false).
+   * Добаление возможно только во вновь создаваемый пул (т.е. если \ref is_read_only возвращает false).
    *
    * Перед добавлением транзакция проходит проверку на валидность по базе данных, указанной для
    * пула, и по ранее добавленным транзакциям. Если база данных не задана, или она была закрыта,
@@ -121,7 +180,7 @@ public:
    *
    * Для read-only пулов функция не делает ничего и просто возвращает true.
    */
-  bool compose();
+  bool compose(sign_fn_t sign_fn = nullptr);
 
   /**
    * @brief Хеш пула
@@ -129,6 +188,13 @@ public:
    *         случае.
    */
   PoolHash hash() const noexcept;
+
+  /**
+   * @brief ЭЦП пула
+   * @return ЭЦП пула, если пул находится в режиме read-only имеет ЭЦП, и пустой массив
+   *         в противном случае
+   */
+  ::csdb::internal::byte_array sign() const noexcept;
 
   /**
    * @brief Бинарное представление пула
@@ -196,12 +262,33 @@ public:
    */
   Transaction transaction(TransactionID id) const;
 
+  /**
+  * @brief Получить последнюю транзакцию по адресу источника
+  * @param[in] source Адрес источника
+  * @return Возвращает объект транзакции. Если транзакции не существует в данном пуле, возвращается
+  *         невалидный объект (\ref ::csdb::Transaction::is_valid() == false).
+  */
+  Transaction get_last_by_source(Address source) const noexcept;
+
+  /**
+  * @brief Получить последнюю транзакцию по адресу назначения
+  * @param[in] source Адрес назначения
+  * @return Возвращает объект транзакции. Если транзакции не существует в данном пуле, возвращается
+  *         невалидный объект (\ref ::csdb::Transaction::is_valid() == false).
+  */
+  Transaction get_last_by_target(Address target) const noexcept;
+
   friend class Storage;
 };
 
 inline bool PoolHash::operator !=(const PoolHash &other) const noexcept
 {
   return !operator ==(other);
+}
+
+inline Pool Pool::load(PoolHash hash, Storage storage)
+{
+  return load(hash, nullptr, storage);
 }
 
 } // namespace csdb
